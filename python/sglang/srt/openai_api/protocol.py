@@ -17,21 +17,22 @@ limitations under the License.
 
 import abc
 import time
+import json
 from typing import Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 from typing_extensions import Literal
-from sglang.srt.openai_api import protocol_proto
+from sglang.srt.openai_api import protocol_pb2
 
 
 class ProtoConvertible(abc.ABC):
     @abc.abstractmethod
-    def to_proto(self) -> "protocol_proto.Message":
+    def to_proto(self):
         pass
 
     @classmethod
     @abc.abstractmethod
-    def from_proto(cls, proto: "protocol_proto.Message") -> "ProtoConvertible":
+    def from_proto(cls, proto) -> "ProtoConvertible":
         pass
 
 
@@ -44,8 +45,8 @@ class ModelCard(BaseModel, ProtoConvertible):
     owned_by: str = "sglang"
     root: Optional[str] = None
 
-    def to_proto(self) -> "protocol_proto.ModelCard":
-        return protocol_proto.ModelCard(
+    def to_proto(self):
+        return protocol_pb2.ModelCard(
             id=self.id,
             object=self.object,
             created=self.created,
@@ -54,7 +55,7 @@ class ModelCard(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ModelCard") -> "ModelCard":
+    def from_proto(cls, proto) -> "ModelCard":
         return cls(
             id=proto.id,
             object=proto.object,
@@ -70,14 +71,14 @@ class ModelList(BaseModel, ProtoConvertible):
     object: str = "list"
     data: List[ModelCard] = []
 
-    def to_proto(self) -> "protocol_proto.ModelList":
-        return protocol_proto.ModelList(
+    def to_proto(self):
+        return protocol_pb2.ModelList(
             object=self.object,
             data=[card.to_proto() for card in self.data]
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ModelList") -> "ModelList":
+    def from_proto(cls, proto) -> "ModelList":
         return cls(
             object=proto.object,
             data=[ModelCard.from_proto(card) for card in proto.data]
@@ -91,8 +92,8 @@ class ErrorResponse(BaseModel, ProtoConvertible):
     param: Optional[str] = None
     code: int
 
-    def to_proto(self) -> "protocol_proto.ErrorResponse":
-        return protocol_proto.ErrorResponse(
+    def to_proto(self):
+        return protocol_pb2.ErrorResponse(
             object=self.object,
             message=self.message,
             type=self.type,
@@ -101,7 +102,7 @@ class ErrorResponse(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ErrorResponse") -> "ErrorResponse":
+    def from_proto(cls, proto) -> "ErrorResponse":
         return cls(
             object=proto.object,
             message=proto.message,
@@ -117,21 +118,36 @@ class LogProbs(BaseModel, ProtoConvertible):
     tokens: List[str] = Field(default_factory=list)
     top_logprobs: List[Optional[Dict[str, float]]] = Field(default_factory=list)
 
-    def to_proto(self) -> "protocol_proto.LogProbs":
-        return protocol_proto.LogProbs(
+    def to_proto(self):
+        # Convert list of dicts to list of TokenLogprobs
+        top_logprobs_proto = []
+        for logprob_dict in self.top_logprobs:
+            if logprob_dict is not None:
+                token_logprobs = protocol_pb2.TokenLogprobs(values=logprob_dict)
+                top_logprobs_proto.append(token_logprobs)
+            else:
+                top_logprobs_proto.append(protocol_pb2.TokenLogprobs())
+
+        return protocol_pb2.LogProbs(
             text_offset=self.text_offset,
             token_logprobs=[lp for lp in self.token_logprobs if lp is not None],
             tokens=self.tokens,
-            top_logprobs=[lp for lp in self.top_logprobs if lp is not None]
+            top_logprobs=top_logprobs_proto
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.LogProbs") -> "LogProbs":
+    def from_proto(cls, proto) -> "LogProbs":
+        # Convert list of TokenLogprobs back to list of dicts
+        top_logprobs = [
+            logprob.values if logprob.values else None
+            for logprob in proto.top_logprobs
+        ]
+
         return cls(
             text_offset=proto.text_offset,
             token_logprobs=proto.token_logprobs,
             tokens=proto.tokens,
-            top_logprobs=proto.top_logprobs
+            top_logprobs=top_logprobs
         )
 
 
@@ -140,15 +156,15 @@ class TopLogprob(BaseModel, ProtoConvertible):
     bytes: List[int]
     logprob: float
 
-    def to_proto(self) -> "protocol_proto.TopLogprob":
-        return protocol_proto.TopLogprob(
+    def to_proto(self):
+        return protocol_pb2.TopLogprob(
             token=self.token,
             bytes=self.bytes,
             logprob=self.logprob
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.TopLogprob") -> "TopLogprob":
+    def from_proto(cls, proto) -> "TopLogprob":
         return cls(
             token=proto.token,
             bytes=proto.bytes,
@@ -162,8 +178,8 @@ class ChatCompletionTokenLogprob(BaseModel, ProtoConvertible):
     logprob: float
     top_logprobs: List[TopLogprob]
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionTokenLogprob":
-        return protocol_proto.ChatCompletionTokenLogprob(
+    def to_proto(self):
+        return protocol_pb2.ChatCompletionTokenLogprob(
             token=self.token,
             bytes=self.bytes,
             logprob=self.logprob,
@@ -171,7 +187,7 @@ class ChatCompletionTokenLogprob(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionTokenLogprob") -> "ChatCompletionTokenLogprob":
+    def from_proto(cls, proto) -> "ChatCompletionTokenLogprob":
         return cls(
             token=proto.token,
             bytes=proto.bytes,
@@ -184,13 +200,13 @@ class ChoiceLogprobs(BaseModel, ProtoConvertible):
     # build for v1/chat/completions response
     content: List[ChatCompletionTokenLogprob]
 
-    def to_proto(self) -> "protocol_proto.ChoiceLogprobs":
-        return protocol_proto.ChoiceLogprobs(
+    def to_proto(self):
+        return protocol_pb2.ChoiceLogprobs(
             content=[lp.to_proto() for lp in self.content]
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChoiceLogprobs") -> "ChoiceLogprobs":
+    def from_proto(cls, proto) -> "ChoiceLogprobs":
         return cls(
             content=[ChatCompletionTokenLogprob.from_proto(lp) for lp in proto.content]
         )
@@ -203,8 +219,8 @@ class UsageInfo(BaseModel, ProtoConvertible):
     # only used to return cached tokens when --enable-cache-report is set
     prompt_tokens_details: Optional[Dict[str, int]] = None
 
-    def to_proto(self) -> "protocol_proto.UsageInfo":
-        return protocol_proto.UsageInfo(
+    def to_proto(self):
+        return protocol_pb2.UsageInfo(
             prompt_tokens=self.prompt_tokens,
             total_tokens=self.total_tokens,
             completion_tokens=self.completion_tokens,
@@ -212,7 +228,7 @@ class UsageInfo(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.UsageInfo") -> "UsageInfo":
+    def from_proto(cls, proto) -> "UsageInfo":
         return cls(
             prompt_tokens=proto.prompt_tokens,
             total_tokens=proto.total_tokens,
@@ -224,13 +240,13 @@ class UsageInfo(BaseModel, ProtoConvertible):
 class StreamOptions(BaseModel, ProtoConvertible):
     include_usage: Optional[bool] = False
 
-    def to_proto(self) -> "protocol_proto.StreamOptions":
-        return protocol_proto.StreamOptions(
+    def to_proto(self):
+        return protocol_pb2.StreamOptions(
             include_usage=self.include_usage
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.StreamOptions") -> "StreamOptions":
+    def from_proto(cls, proto) -> "StreamOptions":
         return cls(
             include_usage=proto.include_usage
         )
@@ -243,20 +259,20 @@ class JsonSchemaResponseFormat(BaseModel, ProtoConvertible):
     schema_: Optional[Dict[str, object]] = Field(alias="schema", default=None)
     strict: Optional[bool] = False
 
-    def to_proto(self) -> "protocol_proto.JsonSchemaResponseFormat":
-        return protocol_proto.JsonSchemaResponseFormat(
+    def to_proto(self):
+        return protocol_pb2.JsonSchemaResponseFormat(
             name=self.name,
             description=self.description,
-            schema=self.schema_,
+            schema=json.dumps(self.schema_) if self.schema_ is not None else None,
             strict=self.strict
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.JsonSchemaResponseFormat") -> "JsonSchemaResponseFormat":
+    def from_proto(cls, proto) -> "JsonSchemaResponseFormat":
         return cls(
             name=proto.name,
             description=proto.description,
-            schema=proto.schema,
+            schema=json.loads(proto.schema) if proto.schema else None,
             strict=proto.strict
         )
 
@@ -268,14 +284,14 @@ class FileRequest(BaseModel, ProtoConvertible):
         "batch"  # The intended purpose of the uploaded file, default is "batch"
     )
 
-    def to_proto(self) -> "protocol_proto.FileRequest":
-        return protocol_proto.FileRequest(
+    def to_proto(self):
+        return protocol_pb2.FileRequest(
             file=self.file,
             purpose=self.purpose
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.FileRequest") -> "FileRequest":
+    def from_proto(cls, proto) -> "FileRequest":
         return cls(
             file=proto.file,
             purpose=proto.purpose
@@ -290,8 +306,8 @@ class FileResponse(BaseModel, ProtoConvertible):
     filename: str
     purpose: str
 
-    def to_proto(self) -> "protocol_proto.FileResponse":
-        return protocol_proto.FileResponse(
+    def to_proto(self):
+        return protocol_pb2.FileResponse(
             id=self.id,
             object=self.object,
             bytes=self.bytes,
@@ -301,7 +317,7 @@ class FileResponse(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.FileResponse") -> "FileResponse":
+    def from_proto(cls, proto) -> "FileResponse":
         return cls(
             id=proto.id,
             object=proto.object,
@@ -317,15 +333,15 @@ class FileDeleteResponse(BaseModel, ProtoConvertible):
     object: str = "file"
     deleted: bool
 
-    def to_proto(self) -> "protocol_proto.FileDeleteResponse":
-        return protocol_proto.FileDeleteResponse(
+    def to_proto(self):
+        return protocol_pb2.FileDeleteResponse(
             id=self.id,
             object=self.object,
             deleted=self.deleted
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.FileDeleteResponse") -> "FileDeleteResponse":
+    def from_proto(cls, proto) -> "FileDeleteResponse":
         return cls(
             id=proto.id,
             object=proto.object,
@@ -336,14 +352,14 @@ class BatchMetadata(BaseModel, ProtoConvertible):
     key: str
     value: str
 
-    def to_proto(self) -> "protocol_proto.BatchMetadata":
-        return protocol_proto.BatchMetadata(
+    def to_proto(self):
+        return protocol_pb2.BatchMetadata(
             key=self.key,
             value=self.value
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.BatchMetadata") -> "BatchMetadata":
+    def from_proto(cls, proto) -> "BatchMetadata":
         return cls(
             key=proto.key,
             value=proto.value
@@ -357,8 +373,8 @@ class BatchRequest(BaseModel, ProtoConvertible):
     completion_window: str  # The time frame within which the batch should be processed
     metadata: Optional[List[BatchMetadata]] = None  # Optional custom metadata for the batch
 
-    def to_proto(self) -> "protocol_proto.BatchRequest":
-        return protocol_proto.BatchRequest(
+    def to_proto(self):
+        return protocol_pb2.BatchRequest(
             input_file_id=self.input_file_id,
             endpoint=self.endpoint,
             completion_window=self.completion_window,
@@ -366,7 +382,7 @@ class BatchRequest(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.BatchRequest") -> "BatchRequest":
+    def from_proto(cls, proto) -> "BatchRequest":
         return cls(
             input_file_id=proto.input_file_id,
             endpoint=proto.endpoint,
@@ -378,14 +394,14 @@ class BatchError(BaseModel, ProtoConvertible):
     code: str
     message: str
 
-    def to_proto(self) -> "protocol_proto.BatchError":
-        return protocol_proto.BatchError(
+    def to_proto(self):
+        return protocol_pb2.BatchError(
             code=self.code,
             message=self.message
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.BatchError") -> "BatchError":
+    def from_proto(cls, proto) -> "BatchError":
         return cls(
             code=proto.code,
             message=proto.message
@@ -413,14 +429,14 @@ class BatchResponse(BaseModel, ProtoConvertible):
     request_counts: dict = {"total": 0, "completed": 0, "failed": 0}
     metadata: Optional[List[BatchMetadata]] = None
 
-    def to_proto(self) -> "protocol_proto.BatchResponse":
-        request_counts = protocol_proto.RequestCounts(
+    def to_proto(self):
+        request_counts = protocol_pb2.RequestCounts(
             total=self.request_counts.get("total", 0),
             completed=self.request_counts.get("completed", 0),
             failed=self.request_counts.get("failed", 0)
         )
 
-        return protocol_proto.BatchResponse(
+        return protocol_pb2.BatchResponse(
             id=self.id,
             object=self.object,
             endpoint=self.endpoint,
@@ -444,7 +460,7 @@ class BatchResponse(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.BatchResponse") -> "BatchResponse":
+    def from_proto(cls, proto) -> "BatchResponse":
         request_counts = {
             "total": proto.request_counts.total,
             "completed": proto.request_counts.completed,
@@ -478,14 +494,14 @@ class StopTrimConfig(BaseModel, ProtoConvertible):
     single: bool = False
     multiple: List[bool] = Field(default_factory=list)
 
-    def to_proto(self) -> "protocol_proto.StopTrimConfig":
-        return protocol_proto.StopTrimConfig(
+    def to_proto(self):
+        return protocol_pb2.StopTrimConfig(
             single=self.single,
             multiple=self.multiple
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.StopTrimConfig") -> "StopTrimConfig":
+    def from_proto(cls, proto) -> "StopTrimConfig":
         return cls(
             single=proto.single,
             multiple=proto.multiple
@@ -522,8 +538,8 @@ class CompletionRequest(BaseModel, ProtoConvertible):
     stop_token_ids: Optional[List[int]] = Field(default_factory=list)
     no_stop_trim: Union[bool, List[bool]] = False
 
-    def to_proto(self) -> "protocol_proto.CompletionRequest":
-        prompt_content = protocol_proto.PromptContent()
+    def to_proto(self):
+        prompt_content = protocol_pb2.PromptContent()
         if isinstance(self.prompt, str):
             prompt_content.text = self.prompt
         elif isinstance(self.prompt, list):
@@ -534,7 +550,7 @@ class CompletionRequest(BaseModel, ProtoConvertible):
             else:
                 prompt_content.texts.extend(self.prompt)
 
-        no_stop_trim = protocol_proto.StopTrimConfig(
+        no_stop_trim = protocol_pb2.StopTrimConfig(
             single=self.no_stop_trim if isinstance(self.no_stop_trim, bool) else False,
             multiple=self.no_stop_trim if isinstance(self.no_stop_trim, list) else []
         )
@@ -545,7 +561,7 @@ class CompletionRequest(BaseModel, ProtoConvertible):
         elif isinstance(self.stop, list):
             stop_list.extend(self.stop)
 
-        return protocol_proto.CompletionRequest(
+        return protocol_pb2.CompletionRequest(
             model=self.model,
             prompt=prompt_content,
             best_of=self.best_of,
@@ -574,7 +590,7 @@ class CompletionRequest(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.CompletionRequest") -> "CompletionRequest":
+    def from_proto(cls, proto) -> "CompletionRequest":
         # Convert prompt from proto format
         if proto.prompt.text:
             prompt = proto.prompt.text
@@ -624,14 +640,14 @@ class CompletionResponseChoice(BaseModel, ProtoConvertible):
     finish_reason: Optional[str] = None
     matched_stop: Union[None, int, str] = None
 
-    def to_proto(self) -> "protocol_proto.CompletionResponseChoice":
+    def to_proto(self):
         matched_stop = None
         if isinstance(self.matched_stop, int):
-            matched_stop = protocol_proto.MatchedStop(int_value=self.matched_stop)
+            matched_stop = protocol_pb2.MatchedStop(int_value=self.matched_stop)
         elif isinstance(self.matched_stop, str):
-            matched_stop = protocol_proto.MatchedStop(str_value=self.matched_stop)
+            matched_stop = protocol_pb2.MatchedStop(str_value=self.matched_stop)
 
-        return protocol_proto.CompletionResponseChoice(
+        return protocol_pb2.CompletionResponseChoice(
             index=self.index,
             text=self.text,
             logprobs=self.logprobs.to_proto() if self.logprobs else None,
@@ -640,7 +656,7 @@ class CompletionResponseChoice(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.CompletionResponseChoice") -> "CompletionResponseChoice":
+    def from_proto(cls, proto) -> "CompletionResponseChoice":
         matched_stop = None
         if proto.matched_stop:
             if proto.matched_stop.int_value is not None:
@@ -665,8 +681,8 @@ class CompletionResponse(BaseModel, ProtoConvertible):
     choices: List[CompletionResponseChoice]
     usage: UsageInfo
 
-    def to_proto(self) -> "protocol_proto.CompletionResponse":
-        return protocol_proto.CompletionResponse(
+    def to_proto(self):
+        return protocol_pb2.CompletionResponse(
             id=self.id,
             object=self.object,
             created=self.created,
@@ -676,7 +692,7 @@ class CompletionResponse(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.CompletionResponse") -> "CompletionResponse":
+    def from_proto(cls, proto) -> "CompletionResponse":
         return cls(
             id=proto.id,
             object=proto.object,
@@ -694,21 +710,21 @@ class CompletionResponseStreamChoice(BaseModel, ProtoConvertible):
     finish_reason: Optional[str] = None
     matched_stop: Union[None, int, str] = None
 
-    def to_proto(self) -> "protocol_proto.CompletionResponseStreamChoice":
+    def to_proto(self):
         logprobs_proto = None
         if self.logprobs:
             if isinstance(self.logprobs, LogProbs):
-                logprobs_proto = protocol_proto.LogProbsUnion(basic=self.logprobs.to_proto())
+                logprobs_proto = protocol_pb2.LogProbsUnion(basic=self.logprobs.to_proto())
             elif isinstance(self.logprobs, ChoiceLogprobs):
-                logprobs_proto = protocol_proto.LogProbsUnion(choice=self.logprobs.to_proto())
+                logprobs_proto = protocol_pb2.LogProbsUnion(choice=self.logprobs.to_proto())
 
         matched_stop = None
         if isinstance(self.matched_stop, int):
-            matched_stop = protocol_proto.MatchedStop(int_value=self.matched_stop)
+            matched_stop = protocol_pb2.MatchedStop(int_value=self.matched_stop)
         elif isinstance(self.matched_stop, str):
-            matched_stop = protocol_proto.MatchedStop(str_value=self.matched_stop)
+            matched_stop = protocol_pb2.MatchedStop(str_value=self.matched_stop)
 
-        return protocol_proto.CompletionResponseStreamChoice(
+        return protocol_pb2.CompletionResponseStreamChoice(
             index=self.index,
             text=self.text,
             logprobs=logprobs_proto,
@@ -717,8 +733,13 @@ class CompletionResponseStreamChoice(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.CompletionResponseStreamChoice") -> "CompletionResponseStreamChoice":
-        logprobs = LogProbs.from_proto(proto.logprobs) if proto.logprobs else None
+    def from_proto(cls, proto) -> "CompletionResponseStreamChoice":
+        logprobs = None
+        if proto.logprobs:
+            if proto.logprobs.basic:
+                logprobs = LogProbs.from_proto(proto.logprobs.basic)
+            elif proto.logprobs.choice:
+                logprobs = ChoiceLogprobs.from_proto(proto.logprobs.choice)
 
         matched_stop = None
         if proto.matched_stop:
@@ -744,8 +765,8 @@ class CompletionStreamResponse(BaseModel, ProtoConvertible):
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = None
 
-    def to_proto(self) -> "protocol_proto.CompletionStreamResponse":
-        return protocol_proto.CompletionStreamResponse(
+    def to_proto(self):
+        return protocol_pb2.CompletionStreamResponse(
             id=self.id,
             object=self.object,
             created=self.created,
@@ -755,7 +776,7 @@ class CompletionStreamResponse(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.CompletionStreamResponse") -> "CompletionStreamResponse":
+    def from_proto(cls, proto) -> "CompletionStreamResponse":
         return cls(
             id=proto.id,
             object=proto.object,
@@ -770,32 +791,31 @@ class ChatCompletionMessageContentTextPart(BaseModel, ProtoConvertible):
     type: Literal["text"]
     text: str
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionMessageContentTextPart":
-        return protocol_proto.ChatCompletionMessageContentTextPart(
+    def to_proto(self):
+        return protocol_pb2.ChatCompletionMessageContentTextPart(
             type=self.type,
             text=self.text
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionMessageContentTextPart") -> "ChatCompletionMessageContentTextPart":
+    def from_proto(cls, proto) -> "ChatCompletionMessageContentTextPart":
         return cls(
             type=proto.type,
             text=proto.text
         )
 
-
 class ChatCompletionMessageContentImageURL(BaseModel, ProtoConvertible):
     url: str
     detail: Optional[Literal["auto", "low", "high"]] = "auto"
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionMessageContentImageURL":
-        return protocol_proto.ChatCompletionMessageContentImageURL(
+    def to_proto(self):
+        return protocol_pb2.ChatCompletionMessageContentImageURL(
             url=self.url,
             detail=self.detail
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionMessageContentImageURL") -> "ChatCompletionMessageContentImageURL":
+    def from_proto(cls, proto) -> "ChatCompletionMessageContentImageURL":
         return cls(
             url=proto.url,
             detail=proto.detail
@@ -807,15 +827,15 @@ class ChatCompletionMessageContentImagePart(BaseModel, ProtoConvertible):
     image_url: ChatCompletionMessageContentImageURL
     modalities: Optional[Literal["image", "multi-images", "video"]] = "image"
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionMessageContentImagePart":
-        return protocol_proto.ChatCompletionMessageContentImagePart(
+    def to_proto(self):
+        return protocol_pb2.ChatCompletionMessageContentImagePart(
             type=self.type,
             image_url=self.image_url.to_proto(),
             modalities=self.modalities
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionMessageContentImagePart") -> "ChatCompletionMessageContentImagePart":
+    def from_proto(cls, proto) -> "ChatCompletionMessageContentImagePart":
         return cls(
             type=proto.type,
             image_url=ChatCompletionMessageContentImageURL.from_proto(proto.image_url),
@@ -832,20 +852,20 @@ class ChatCompletionMessageGenericParam(BaseModel, ProtoConvertible):
     role: Literal["system", "assistant"]
     content: Union[str, List[ChatCompletionMessageContentTextPart]]
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionMessageGenericParam":
-        content = protocol_proto.GenericMessageContent()
+    def to_proto(self):
+        content = protocol_pb2.GenericMessageContent()
         if isinstance(self.content, str):
             content.text = self.content
         else:
             content.parts.extend([p.to_proto() for p in self.content])
 
-        return protocol_proto.ChatCompletionMessageGenericParam(
+        return protocol_pb2.ChatCompletionMessageGenericParam(
             role=self.role,
             content=content
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionMessageGenericParam") -> "ChatCompletionMessageGenericParam":
+    def from_proto(cls, proto) -> "ChatCompletionMessageGenericParam":
         if proto.content.text:
             content = proto.content.text
         else:
@@ -861,8 +881,8 @@ class ChatCompletionMessageUserParam(BaseModel, ProtoConvertible):
     role: Literal["user"]
     content: Union[str, List[ChatCompletionMessageContentPart]]
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionMessageUserParam":
-        content = protocol_proto.MessageContent()
+    def to_proto(self):
+        content = protocol_pb2.MessageContent()
         if isinstance(self.content, str):
             content.text = self.content
         else:
@@ -872,13 +892,13 @@ class ChatCompletionMessageUserParam(BaseModel, ProtoConvertible):
                 elif isinstance(p, ChatCompletionMessageContentImagePart):
                     content.images.append(p.to_proto())
 
-        return protocol_proto.ChatCompletionMessageUserParam(
+        return protocol_pb2.ChatCompletionMessageUserParam(
             role=self.role,
             content=content
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionMessageUserParam") -> "ChatCompletionMessageUserParam":
+    def from_proto(cls, proto) -> "ChatCompletionMessageUserParam":
         if proto.content.text:
             content = proto.content.text
         else:
@@ -903,14 +923,14 @@ class ResponseFormat(BaseModel, ProtoConvertible):
     type: Literal["text", "json_object", "json_schema"]
     json_schema: Optional[JsonSchemaResponseFormat] = None
 
-    def to_proto(self) -> "protocol_proto.ResponseFormat":
-        return protocol_proto.ResponseFormat(
+    def to_proto(self):
+        return protocol_pb2.ResponseFormat(
             type=self.type,
             json_schema=self.json_schema.to_proto() if self.json_schema else None
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ResponseFormat") -> "ResponseFormat":
+    def from_proto(cls, proto) -> "ResponseFormat":
         return cls(
             type=proto.type,
             json_schema=JsonSchemaResponseFormat.from_proto(proto.json_schema) if proto.json_schema else None
@@ -945,7 +965,7 @@ class ChatCompletionRequest(BaseModel, ProtoConvertible):
     stop_token_ids: Optional[List[int]] = Field(default_factory=list)
     ignore_eos: bool = False
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionRequest":
+    def to_proto(self):
         stop_list = []
         if isinstance(self.stop, str):
             stop_list.append(self.stop)
@@ -955,19 +975,19 @@ class ChatCompletionRequest(BaseModel, ProtoConvertible):
         messages_proto = []
         for msg in self.messages:
             if isinstance(msg, ChatCompletionMessageGenericParam):
-                content = protocol_proto.GenericMessageContent()
+                content = protocol_pb2.GenericMessageContent()
                 if isinstance(msg.content, str):
                     content.text = msg.content
                 else:
                     content.parts.extend([p.to_proto() for p in msg.content])
-                messages_proto.append(protocol_proto.MessageParam(
-                    generic_param=protocol_proto.ChatCompletionMessageGenericParam(
+                messages_proto.append(protocol_pb2.MessageParam(
+                    generic_param=protocol_pb2.ChatCompletionMessageGenericParam(
                         role=msg.role,
                         content=content
                     )
                 ))
             else:  # UserParam
-                content = protocol_proto.MessageContent()
+                content = protocol_pb2.MessageContent()
                 if isinstance(msg.content, str):
                     content.text = msg.content
                 else:
@@ -976,14 +996,14 @@ class ChatCompletionRequest(BaseModel, ProtoConvertible):
                             content.parts.append(p.to_proto())
                         elif isinstance(p, ChatCompletionMessageContentImagePart):
                                 content.images.append(p.to_proto())
-                messages_proto.append(protocol_proto.MessageParam(
-                    user_param=protocol_proto.ChatCompletionMessageUserParam(
+                messages_proto.append(protocol_pb2.MessageParam(
+                    user_param=protocol_pb2.ChatCompletionMessageUserParam(
                         role=msg.role,
                         content=content
                     )
                 ))
 
-        return protocol_proto.ChatCompletionRequest(
+        return protocol_pb2.ChatCompletionRequest(
             messages=messages_proto,
             model=self.model,
             frequency_penalty=self.frequency_penalty,
@@ -1009,7 +1029,7 @@ class ChatCompletionRequest(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionRequest") -> "ChatCompletionRequest":
+    def from_proto(cls, proto) -> "ChatCompletionRequest":
         messages = []
         for msg_param in proto.messages:
             if msg_param.HasField('generic_param'):
@@ -1068,14 +1088,14 @@ class ChatMessage(BaseModel, ProtoConvertible):
     role: Optional[str] = None
     content: Optional[str] = None
 
-    def to_proto(self) -> "protocol_proto.ChatMessage":
-        return protocol_proto.ChatMessage(
+    def to_proto(self):
+        return protocol_pb2.ChatMessage(
             role=self.role,
             content=self.content
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatMessage") -> "ChatMessage":
+    def from_proto(cls, proto) -> "ChatMessage":
         return cls(
             role=proto.role,
             content=proto.content
@@ -1089,25 +1109,25 @@ class ChatCompletionResponseChoice(BaseModel, ProtoConvertible):
     finish_reason: str
     matched_stop: Union[None, int, str] = None
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionResponseChoice":
+    def to_proto(self):
         logprobs_proto = None
         if self.logprobs:
             if isinstance(self.logprobs, LogProbs):
-                logprobs_proto = protocol_proto.LogProbsUnion(
+                logprobs_proto = protocol_pb2.LogProbsUnion(
                     basic=self.logprobs.to_proto()
                 )
             elif isinstance(self.logprobs, ChoiceLogprobs):
-                logprobs_proto = protocol_proto.LogProbsUnion(
+                logprobs_proto = protocol_pb2.LogProbsUnion(
                     choice=self.logprobs.to_proto()
                 )
 
         matched_stop = None
         if isinstance(self.matched_stop, int):
-            matched_stop = protocol_proto.MatchedStop(int_value=self.matched_stop)
+            matched_stop = protocol_pb2.MatchedStop(int_value=self.matched_stop)
         elif isinstance(self.matched_stop, str):
-            matched_stop = protocol_proto.MatchedStop(str_value=self.matched_stop)
+            matched_stop = protocol_pb2.MatchedStop(str_value=self.matched_stop)
 
-        return protocol_proto.ChatCompletionResponseChoice(
+        return protocol_pb2.ChatCompletionResponseChoice(
             index=self.index,
             message=self.message.to_proto(),
             logprobs=logprobs_proto,
@@ -1116,7 +1136,7 @@ class ChatCompletionResponseChoice(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionResponseChoice") -> "ChatCompletionResponseChoice":
+    def from_proto(cls, proto) -> "ChatCompletionResponseChoice":
         logprobs = None
         if proto.logprobs:
             if proto.logprobs.basic:
@@ -1148,8 +1168,8 @@ class ChatCompletionResponse(BaseModel, ProtoConvertible):
     choices: List[ChatCompletionResponseChoice]
     usage: UsageInfo
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionResponse":
-        return protocol_proto.ChatCompletionResponse(
+    def to_proto(self):
+        return protocol_pb2.ChatCompletionResponse(
             id=self.id,
             object=self.object,
             created=self.created,
@@ -1159,7 +1179,7 @@ class ChatCompletionResponse(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionResponse") -> "ChatCompletionResponse":
+    def from_proto(cls, proto) -> "ChatCompletionResponse":
         return cls(
             id=proto.id,
             object=proto.object,
@@ -1174,14 +1194,14 @@ class DeltaMessage(BaseModel, ProtoConvertible):
     role: Optional[str] = None
     content: Optional[str] = None
 
-    def to_proto(self) -> "protocol_proto.DeltaMessage":
-        return protocol_proto.DeltaMessage(
+    def to_proto(self):
+        return protocol_pb2.DeltaMessage(
             role=self.role,
             content=self.content
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.DeltaMessage") -> "DeltaMessage":
+    def from_proto(cls, proto) -> "DeltaMessage":
         return cls(
             role=proto.role,
             content=proto.content
@@ -1195,21 +1215,21 @@ class ChatCompletionResponseStreamChoice(BaseModel, ProtoConvertible):
     finish_reason: Optional[str] = None
     matched_stop: Union[None, int, str] = None
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionResponseStreamChoice":
+    def to_proto(self):
         logprobs_proto = None
         if self.logprobs:
             if isinstance(self.logprobs, LogProbs):
-                logprobs_proto = protocol_proto.LogProbsUnion(basic=self.logprobs.to_proto())
+                logprobs_proto = protocol_pb2.LogProbsUnion(basic=self.logprobs.to_proto())
             elif isinstance(self.logprobs, ChoiceLogprobs):
-                logprobs_proto = protocol_proto.LogProbsUnion(choice=self.logprobs.to_proto())
+                logprobs_proto = protocol_pb2.LogProbsUnion(choice=self.logprobs.to_proto())
 
         matched_stop = None
         if isinstance(self.matched_stop, int):
-            matched_stop = protocol_proto.MatchedStop(int_value=self.matched_stop)
+            matched_stop = protocol_pb2.MatchedStop(int_value=self.matched_stop)
         elif isinstance(self.matched_stop, str):
-            matched_stop = protocol_proto.MatchedStop(str_value=self.matched_stop)
+            matched_stop = protocol_pb2.MatchedStop(str_value=self.matched_stop)
 
-        return protocol_proto.ChatCompletionResponseStreamChoice(
+        return protocol_pb2.ChatCompletionResponseStreamChoice(
             index=self.index,
             delta=self.delta.to_proto(),
             logprobs=logprobs_proto,
@@ -1218,7 +1238,7 @@ class ChatCompletionResponseStreamChoice(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionResponseStreamChoice") -> "ChatCompletionResponseStreamChoice":
+    def from_proto(cls, proto) -> "ChatCompletionResponseStreamChoice":
         logprobs = LogProbs.from_proto(proto.logprobs) if proto.logprobs else None
 
         matched_stop = None
@@ -1245,8 +1265,8 @@ class ChatCompletionStreamResponse(BaseModel, ProtoConvertible):
     choices: List[ChatCompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = None
 
-    def to_proto(self) -> "protocol_proto.ChatCompletionStreamResponse":
-        return protocol_proto.ChatCompletionStreamResponse(
+    def to_proto(self):
+        return protocol_pb2.ChatCompletionStreamResponse(
             id=self.id,
             object=self.object,
             created=self.created,
@@ -1256,7 +1276,7 @@ class ChatCompletionStreamResponse(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.ChatCompletionStreamResponse") -> "ChatCompletionStreamResponse":
+    def from_proto(cls, proto) -> "ChatCompletionStreamResponse":
         return cls(
             id=proto.id,
             object=proto.object,
@@ -1276,8 +1296,8 @@ class EmbeddingRequest(BaseModel, ProtoConvertible):
     dimensions: int = None
     user: Optional[str] = None
 
-    def to_proto(self) -> "protocol_proto.EmbeddingRequest":
-        input_content = protocol_proto.EmbeddingInput()
+    def to_proto(self):
+        input_content = protocol_pb2.EmbeddingInput()
         if isinstance(self.input, str):
             input_content.text = self.input
         elif isinstance(self.input, list):
@@ -1288,7 +1308,7 @@ class EmbeddingRequest(BaseModel, ProtoConvertible):
             else:
                 input_content.texts.extend(self.input)
 
-        return protocol_proto.EmbeddingRequest(
+        return protocol_pb2.EmbeddingRequest(
             input=input_content,
             model=self.model,
             encoding_format=self.encoding_format,
@@ -1297,7 +1317,7 @@ class EmbeddingRequest(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.EmbeddingRequest") -> "EmbeddingRequest":
+    def from_proto(cls, proto) -> "EmbeddingRequest":
         # Convert input from proto format
         if proto.input.text:
             input_value = proto.input.text
@@ -1322,15 +1342,15 @@ class EmbeddingObject(BaseModel, ProtoConvertible):
     index: int
     object: str = "embedding"
 
-    def to_proto(self) -> "protocol_proto.EmbeddingObject":
-        return protocol_proto.EmbeddingObject(
+    def to_proto(self):
+        return protocol_pb2.EmbeddingObject(
             embedding=self.embedding,
             index=self.index,
             object=self.object
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.EmbeddingObject") -> "EmbeddingObject":
+    def from_proto(cls, proto) -> "EmbeddingObject":
         return cls(
             embedding=proto.embedding,
             index=proto.index,
@@ -1344,8 +1364,8 @@ class EmbeddingResponse(BaseModel, ProtoConvertible):
     object: str = "list"
     usage: Optional[UsageInfo] = None
 
-    def to_proto(self) -> "protocol_proto.EmbeddingResponse":
-        return protocol_proto.EmbeddingResponse(
+    def to_proto(self):
+        return protocol_pb2.EmbeddingResponse(
             data=[d.to_proto() for d in self.data],
             model=self.model,
             object=self.object,
@@ -1353,7 +1373,7 @@ class EmbeddingResponse(BaseModel, ProtoConvertible):
         )
 
     @classmethod
-    def from_proto(cls, proto: "protocol_proto.EmbeddingResponse") -> "EmbeddingResponse":
+    def from_proto(cls, proto) -> "EmbeddingResponse":
         return cls(
             data=[EmbeddingObject.from_proto(d) for d in proto.data],
             model=proto.model,

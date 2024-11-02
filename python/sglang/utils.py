@@ -19,7 +19,6 @@ from typing import Optional, Union
 
 import numpy as np
 import requests
-from IPython.display import HTML, display
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -353,5 +352,7 @@ def terminate_process(process):
 
 
 def print_highlight(html_content: str):
+    from IPython.display import HTML, display
+
     html_content = str(html_content).replace("\n", "<br>")
     display(HTML(f"<strong style='color: #00008B;'>{html_content}</strong>"))

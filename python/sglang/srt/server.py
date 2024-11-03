@@ -63,7 +63,7 @@ from sglang.srt.openai_api.adapter import (
     v1_batches,
     v1_cancel_batch,
     v1_chat_completions,
-    v1_completions,
+    # v1_completions,
     v1_delete_file,
     v1_embeddings,
     v1_files_create,
@@ -71,6 +71,11 @@ from sglang.srt.openai_api.adapter import (
     v1_retrieve_file,
     v1_retrieve_file_content,
 )
+
+# *** Test ***
+from sglang.srt.openai_api.my_adapter_test import v1_completions
+# *** End Test ***
+
 from sglang.srt.openai_api.protocol import ModelCard, ModelList
 from sglang.srt.server_args import PortArgs, ServerArgs
 from sglang.srt.utils import (

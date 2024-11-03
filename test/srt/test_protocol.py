@@ -1,8 +1,9 @@
 import pytest
 import time
 import math
-from typing import List
+from typing import List, Dict, Any, Callable
 import numpy as np
+import functools
 
 from sglang.srt.openai_api.protocol import (
     ModelCard,
@@ -269,7 +270,12 @@ def test_completion_response_stream_choice():
     choice = CompletionResponseStreamChoice(
         index=0,
         text="Hello",
-        logprobs=None,
+        logprobs=LogProbs(
+            text_offset=[0],
+            token_logprobs=[-0.5],
+            tokens=["Hello"],
+            top_logprobs=[{"Hello": -0.5, "Hi": -1.0}]
+        ),
         finish_reason="stop"
     )
 
@@ -279,6 +285,10 @@ def test_completion_response_stream_choice():
     assert choice.index == choice2.index
     assert choice.text == choice2.text
     assert choice.finish_reason == choice2.finish_reason
+    assert choice.logprobs.text_offset == choice2.logprobs.text_offset
+    assert choice.logprobs.token_logprobs == choice2.logprobs.token_logprobs
+    assert choice.logprobs.tokens == choice2.logprobs.tokens
+    assert choice.logprobs.top_logprobs == choice2.logprobs.top_logprobs
 
 def test_completion_stream_response():
     response = CompletionStreamResponse(
@@ -582,6 +592,181 @@ def test_batch_response():
     assert response.completion_window == response2.completion_window
     assert response.metadata[0].key == response2.metadata[0].key
     assert response.metadata[0].value == response2.metadata[0].value
+
+
+def _test_completion_request_prompt_union(test_value):
+    request = CompletionRequest(
+        model="test-model",
+        prompt=test_value
+    )
+    proto = request.to_proto()
+    request2 = CompletionRequest.from_proto(proto)
+    assert request2.prompt == test_value
+
+def test_completion_request_prompt_union_list_int():
+    _test_completion_request_prompt_union([1, 2, 3])
+
+def test_completion_request_prompt_union_list_list_int():
+    _test_completion_request_prompt_union([[1, 2], [3, 4]])
+
+def test_completion_request_prompt_union_str():
+    _test_completion_request_prompt_union("test prompt")
+
+def test_completion_request_prompt_union_list_str():
+    _test_completion_request_prompt_union(["test1", "test2"])
+
+def _test_completion_request_stop_union(test_value):
+    request = CompletionRequest(
+        model="test-model",
+        prompt="test",
+        stop=test_value
+    )
+    proto = request.to_proto()
+    request2 = CompletionRequest.from_proto(proto)
+    # For single string, it gets converted to list
+    expected = [test_value] if isinstance(test_value, str) else test_value
+    assert request2.stop == expected
+
+def test_completion_request_stop_union_str():
+    _test_completion_request_stop_union("stop")
+
+def test_completion_request_stop_union_list_str():
+    _test_completion_request_stop_union(["stop1", "stop2"])
+
+def _test_completion_request_no_stop_trim_union(test_value):
+    request = CompletionRequest(
+        model="test-model",
+        prompt="test",
+        no_stop_trim=test_value
+    )
+    proto = request.to_proto()
+    request2 = CompletionRequest.from_proto(proto)
+    assert request2.no_stop_trim == test_value
+
+def test_completion_request_no_stop_trim_union_bool():
+    _test_completion_request_no_stop_trim_union(True)
+
+def test_completion_request_no_stop_trim_union_list_bool():
+    _test_completion_request_no_stop_trim_union([True, False])
+
+def _test_completion_response_choice_matched_stop_union(test_value):
+    choice = CompletionResponseChoice(
+        index=0,
+        text="test",
+        matched_stop=test_value
+    )
+    proto = choice.to_proto()
+    choice2 = CompletionResponseChoice.from_proto(proto)
+    assert choice2.matched_stop == test_value
+
+def test_completion_response_choice_matched_stop_union_none():
+    _test_completion_response_choice_matched_stop_union(None)
+
+def test_completion_response_choice_matched_stop_union_int():
+    _test_completion_response_choice_matched_stop_union(1)
+
+def test_completion_response_choice_matched_stop_union_str():
+    _test_completion_response_choice_matched_stop_union("stop")
+
+def _test_completion_response_stream_choice_logprobs_union(test_value):
+    choice = CompletionResponseStreamChoice(
+        index=0,
+        text="test",
+        logprobs=test_value
+    )
+    proto = choice.to_proto()
+    choice2 = CompletionResponseStreamChoice.from_proto(proto)
+    assert choice2.logprobs == test_value
+
+def test_completion_response_stream_choice_logprobs_union_logprobs():
+    _test_completion_response_stream_choice_logprobs_union(LogProbs(tokens=["test"]))
+
+def test_chat_completion_response_stream_choice_logprobs_union_choice_logprobs():
+    choice = ChatCompletionResponseStreamChoice(
+        index=0,
+        delta=DeltaMessage(content="test"),
+        logprobs=ChoiceLogprobs(content=[
+            ChatCompletionTokenLogprob(token="test", logprob=-0.5, bytes=[5], top_logprobs=[])
+        ])
+    )
+    proto = choice.to_proto()
+    choice2 = ChatCompletionResponseStreamChoice.from_proto(proto)
+    assert choice2.logprobs == choice.logprobs
+
+def test_chat_completion_response_stream_choice_logprobs_union_logprobs():
+    choice = ChatCompletionResponseStreamChoice(
+        index=0,
+        delta=DeltaMessage(content="test"),
+        logprobs=LogProbs(
+            text_offset=[0],
+            token_logprobs=[-0.5],
+            tokens=["test"],
+            top_logprobs=[]
+        )
+    )
+    proto = choice.to_proto()
+    choice2 = ChatCompletionResponseStreamChoice.from_proto(proto)
+    assert choice2.logprobs == choice.logprobs
+
+
+def _test_chat_completion_message_generic_param_content_union(test_value):
+    param = ChatCompletionMessageGenericParam(
+        role="system",
+        content=test_value
+    )
+    proto = param.to_proto()
+    param2 = ChatCompletionMessageGenericParam.from_proto(proto)
+    assert param2.content == test_value
+
+def test_chat_completion_message_generic_param_content_union_str():
+    _test_chat_completion_message_generic_param_content_union("test content")
+
+def test_chat_completion_message_generic_param_content_union_list_text_part():
+    _test_chat_completion_message_generic_param_content_union([
+        ChatCompletionMessageContentTextPart(type="text", text="test")
+    ])
+
+def _test_chat_completion_message_user_param_content_union(test_value):
+    param = ChatCompletionMessageUserParam(
+        role="user",
+        content=test_value
+    )
+    proto = param.to_proto()
+    param2 = ChatCompletionMessageUserParam.from_proto(proto)
+    assert param2.content == test_value
+
+def test_chat_completion_message_user_param_content_union_str():
+    _test_chat_completion_message_user_param_content_union("test content")
+
+def test_chat_completion_message_user_param_content_union_list_content_parts():
+    _test_chat_completion_message_user_param_content_union([
+        ChatCompletionMessageContentTextPart(type="text", text="test"),
+        ChatCompletionMessageContentImagePart(
+            type="image_url",
+            image_url=ChatCompletionMessageContentImageURL(url="http://test.com")
+        )
+    ])
+
+def _test_embedding_request_input_union(test_value):
+    request = EmbeddingRequest(
+        model="test-model",
+        input=test_value
+    )
+    proto = request.to_proto()
+    request2 = EmbeddingRequest.from_proto(proto)
+    assert request2.input == test_value
+
+def test_embedding_request_input_union_list_int():
+    _test_embedding_request_input_union([1, 2, 3])
+
+def test_embedding_request_input_union_list_list_int():
+    _test_embedding_request_input_union([[1, 2], [3, 4]])
+
+def test_embedding_request_input_union_str():
+    _test_embedding_request_input_union("test input")
+
+def test_embedding_request_input_union_list_str():
+    _test_embedding_request_input_union(["test1", "test2"])
 
 if __name__ == "__main__":
     pytest.main([__file__])

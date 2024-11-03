@@ -546,7 +546,9 @@ class CompletionRequest(BaseModel, ProtoConvertible):
             if all(isinstance(x, int) for x in self.prompt):
                 prompt_content.tokens.extend(self.prompt)
             elif all(isinstance(x, list) for x in self.prompt):
-                prompt_content.token_matrix.extend(self.prompt)
+                # Convert each inner list to a TokenSequence message
+                token_lists = [protocol_pb2.TokenSequence(tokens=tokens) for tokens in self.prompt]
+                prompt_content.token_matrix.extend(token_lists)
             else:
                 prompt_content.texts.extend(self.prompt)
 
@@ -599,7 +601,7 @@ class CompletionRequest(BaseModel, ProtoConvertible):
         elif proto.prompt.tokens:
             prompt = proto.prompt.tokens
         else:
-            prompt = proto.prompt.token_matrix
+            prompt = [list(token_list.tokens) for token_list in proto.prompt.token_matrix]
 
         # Convert no_stop_trim
         no_stop_trim = proto.no_stop_trim.multiple if proto.no_stop_trim.multiple else proto.no_stop_trim.single
@@ -659,9 +661,9 @@ class CompletionResponseChoice(BaseModel, ProtoConvertible):
     def from_proto(cls, proto) -> "CompletionResponseChoice":
         matched_stop = None
         if proto.matched_stop:
-            if proto.matched_stop.int_value is not None:
+            if proto.matched_stop.HasField('int_value'):
                 matched_stop = proto.matched_stop.int_value
-            elif proto.matched_stop.str_value is not None:
+            elif proto.matched_stop.HasField('str_value'):
                 matched_stop = proto.matched_stop.str_value
 
         return cls(
@@ -713,10 +715,7 @@ class CompletionResponseStreamChoice(BaseModel, ProtoConvertible):
     def to_proto(self):
         logprobs_proto = None
         if self.logprobs:
-            if isinstance(self.logprobs, LogProbs):
-                logprobs_proto = protocol_pb2.LogProbsUnion(basic=self.logprobs.to_proto())
-            elif isinstance(self.logprobs, ChoiceLogprobs):
-                logprobs_proto = protocol_pb2.LogProbsUnion(choice=self.logprobs.to_proto())
+            logprobs_proto = self.logprobs.to_proto()
 
         matched_stop = None
         if isinstance(self.matched_stop, int):
@@ -736,10 +735,7 @@ class CompletionResponseStreamChoice(BaseModel, ProtoConvertible):
     def from_proto(cls, proto) -> "CompletionResponseStreamChoice":
         logprobs = None
         if proto.logprobs:
-            if proto.logprobs.basic:
-                logprobs = LogProbs.from_proto(proto.logprobs.basic)
-            elif proto.logprobs.choice:
-                logprobs = ChoiceLogprobs.from_proto(proto.logprobs.choice)
+            logprobs = LogProbs.from_proto(proto.logprobs)
 
         matched_stop = None
         if proto.matched_stop:
@@ -1239,7 +1235,13 @@ class ChatCompletionResponseStreamChoice(BaseModel, ProtoConvertible):
 
     @classmethod
     def from_proto(cls, proto) -> "ChatCompletionResponseStreamChoice":
-        logprobs = LogProbs.from_proto(proto.logprobs) if proto.logprobs else None
+        logprobs = None
+        if proto.logprobs:
+            assert bool(proto.logprobs.HasField('basic')) ^ bool(proto.logprobs.HasField('choice'))
+            if proto.logprobs.HasField('basic'):
+                logprobs = LogProbs.from_proto(proto.logprobs.basic)
+            elif proto.logprobs.HasField('choice'):
+                logprobs = ChoiceLogprobs.from_proto(proto.logprobs.choice)
 
         matched_stop = None
         if proto.matched_stop:
@@ -1304,7 +1306,10 @@ class EmbeddingRequest(BaseModel, ProtoConvertible):
             if all(isinstance(x, int) for x in self.input):
                 input_content.tokens.extend(self.input)
             elif all(isinstance(x, list) for x in self.input):
-                input_content.token_matrix.extend(self.input)
+                # Convert each inner list to a TokenSequence message
+                for token_list in self.input:
+                    token_seq = protocol_pb2.TokenSequence(tokens=token_list)
+                    input_content.token_matrix.append(token_seq)
             else:
                 input_content.texts.extend(self.input)
 
@@ -1326,7 +1331,7 @@ class EmbeddingRequest(BaseModel, ProtoConvertible):
         elif proto.input.tokens:
             input_value = proto.input.tokens
         else:
-            input_value = proto.input.token_matrix
+            input_value = [list(seq.tokens) for seq in proto.input.token_matrix]
 
         return cls(
             input=input_value,

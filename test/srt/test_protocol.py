@@ -768,5 +768,81 @@ def test_embedding_request_input_union_str():
 def test_embedding_request_input_union_list_str():
     _test_embedding_request_input_union(["test1", "test2"])
 
+def _test_completion_response_stream_choice_matched_stop_union(test_value):
+    choice = CompletionResponseStreamChoice(
+        index=0,
+        text="test",
+        finish_reason="stop",
+        matched_stop=test_value
+    )
+    proto = choice.to_proto()
+    choice2 = CompletionResponseStreamChoice.from_proto(proto)
+    assert choice2.matched_stop == test_value
+
+def test_completion_response_stream_choice_matched_stop_union_none():
+    _test_completion_response_stream_choice_matched_stop_union(None)
+
+def test_completion_response_stream_choice_matched_stop_union_int():
+    _test_completion_response_stream_choice_matched_stop_union(1)
+
+def test_completion_response_stream_choice_matched_stop_union_str():
+    _test_completion_response_stream_choice_matched_stop_union("stop")
+
+def _test_chat_completion_request_stop_union(test_value):
+    request = ChatCompletionRequest(
+        messages=[ChatCompletionMessageUserParam(role="user", content="test")],
+        model="test-model",
+        stop=test_value
+    )
+    proto = request.to_proto()
+    request2 = ChatCompletionRequest.from_proto(proto)
+    expected = [test_value] if isinstance(test_value, str) else test_value
+    assert request2.stop == expected
+
+def test_chat_completion_request_stop_union_str():
+    _test_chat_completion_request_stop_union("stop")
+
+def test_chat_completion_request_stop_union_list_str():
+    _test_chat_completion_request_stop_union(["stop1", "stop2"])
+
+def _test_chat_completion_response_choice_logprobs_union(test_value):
+    choice = ChatCompletionResponseChoice(
+        index=0,
+        message=ChatMessage(role="assistant", content="test"),
+        logprobs=test_value,
+        finish_reason="stop"
+    )
+    proto = choice.to_proto()
+    choice2 = ChatCompletionResponseChoice.from_proto(proto)
+    assert choice2.logprobs == test_value
+
+def test_chat_completion_response_choice_logprobs_union_logprobs():
+    _test_chat_completion_response_choice_logprobs_union(LogProbs(tokens=["test"]))
+
+def test_chat_completion_response_choice_logprobs_union_choice_logprobs():
+    _test_chat_completion_response_choice_logprobs_union(ChoiceLogprobs(content=[
+        ChatCompletionTokenLogprob(token="test", logprob=-0.5, bytes=[5], top_logprobs=[])
+    ]))
+
+def _test_chat_completion_response_choice_matched_stop_union(test_value):
+    choice = ChatCompletionResponseChoice(
+        index=0,
+        message=ChatMessage(role="assistant", content="test"),
+        finish_reason="stop",
+        matched_stop=test_value
+    )
+    proto = choice.to_proto()
+    choice2 = ChatCompletionResponseChoice.from_proto(proto)
+    assert choice2.matched_stop == test_value
+
+def test_chat_completion_response_choice_matched_stop_union_none():
+    _test_chat_completion_response_choice_matched_stop_union(None)
+
+def test_chat_completion_response_choice_matched_stop_union_int():
+    _test_chat_completion_response_choice_matched_stop_union(1)
+
+def test_chat_completion_response_choice_matched_stop_union_str():
+    _test_chat_completion_response_choice_matched_stop_union("stop")
+
 if __name__ == "__main__":
     pytest.main([__file__])

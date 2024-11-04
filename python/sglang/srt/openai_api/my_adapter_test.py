@@ -16,12 +16,11 @@ from sglang.srt.openai_api.protocol import (
     UsageInfo,
 )
 
-def create_error_response(
-    message: str,
-    err_type: str = "BadRequestError",
-):
+def create_error_response(error_message: str) -> ErrorResponse:
     return ErrorResponse(
-        error={"message": message, "type": err_type, "code": HTTPStatus.BAD_REQUEST}
+        message=error_message,
+        type="invalid_request_error",
+        code=400
     )
 
 def v1_generate_request(
@@ -250,17 +249,15 @@ def v1_generate_response(request, ret, tokenizer_manager, to_file=False):
         )
     return response
 
-async def v1_completions(tokenizer_manager, raw_request: Request):
+async def v1_completions(tokenizer_manager, request: CompletionRequest):
     print('MY v1_completions *** '*10)
-
-    request_json = await raw_request.json()
-    all_requests = [CompletionRequest(**request_json)]
+    all_requests = [request]
     adapted_request, request = v1_generate_request(all_requests)
 
     # Non-streaming response
     try:
         ret = await tokenizer_manager.generate_request(
-            adapted_request, raw_request
+            adapted_request, None
         ).__anext__()
     except ValueError as e:
         return create_error_response(str(e))

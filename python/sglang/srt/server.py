@@ -89,6 +89,7 @@ from sglang.srt.utils import (
     set_ulimit,
 )
 from sglang.utils import get_exception_traceback
+from sglang.srt.openai_api.ipc import PyServer, IPCMessageHandler
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 app = FastAPI()
 tokenizer_manager = None
+ipc_server = None  # New global variable for IPC server
 
 app.add_middleware(
     CORSMiddleware,
@@ -348,7 +350,7 @@ def launch_engine(
     Launch the Tokenizer Manager in the main process, the Scheduler in a subprocess, and the Detokenizer Manager in another subprocess.
     """
 
-    global tokenizer_manager
+    global tokenizer_manager, ipc_server
 
     # Configure global environment
     configure_logger(server_args)
@@ -414,6 +416,12 @@ def launch_engine(
     if server_args.chat_template:
         load_chat_template_for_openai_api(tokenizer_manager, server_args.chat_template)
 
+    # Initialize and start IPC server in a separate thread
+    handler = IPCMessageHandler(tokenizer_manager=tokenizer_manager)
+    ipc_server = PyServer(message_handler=handler)
+    ipc_thread = threading.Thread(target=ipc_server.start, daemon=True)
+    ipc_thread.start()
+
     # Wait for model to finish loading
     for i in range(len(scheduler_pipe_readers)):
         scheduler_pipe_readers[i].recv()
@@ -470,6 +478,10 @@ def launch_server(
             loop="uvloop",
         )
     finally:
+        # Add cleanup for IPC server
+        if ipc_server:
+            ipc_server.close()
+            ipc_server = None
         t.join()
 
 
@@ -622,6 +634,11 @@ class Runtime:
         self.endpoint = RuntimeEndpoint(self.url)
 
     def shutdown(self):
+        global ipc_server
+        if ipc_server:
+            ipc_server.close()
+            ipc_server = None
+
         if self.pid is not None:
             kill_child_process(self.pid, include_self=True)
             self.pid = None
@@ -846,6 +863,12 @@ class Engine:
             return ret
 
     def shutdown(self):
+        """Shutdown the engine and cleanup resources."""
+        global ipc_server
+        if ipc_server:
+            ipc_server.close()
+            ipc_server = None
+
         kill_child_process()
 
     def get_tokenizer(self):

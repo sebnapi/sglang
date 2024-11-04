@@ -1,7 +1,14 @@
 syntax = "proto3";
 
-option go_package = "sglang/openai_api_protocol";
-package sglang.openai_api;
+option go_package = "go/sglang/io";
+package sglang.protocol;
+
+
+message IPCMessage {
+  string type = 1;
+  bytes payload = 2;
+  map<string, string> metadata = 3;
+}
 
 message ModelCard {
   string id = 1;
